@@ -1,6 +1,7 @@
 const express = require("express")
 const bodyParser = require("body-parser")
 const fetch = require('node-fetch');
+const pg = require('pg');
 const request = require('request');
 const Hubspot = require('hubspot');
 const Analytics = require("@rudderstack/rudder-sdk-node");
@@ -11,15 +12,8 @@ const PORT = 3000
 
 const accessTokenMapper = {};
 
-const hubspot1 = new Hubspot({
-  apiKey: '2b393f9f-410b-404d-afed-bbc594ebc5fe',
-  checkLimit: false // (Optional) Specify whether to check the API limit on each call. Default: true
-});
-
-const hubspot2 = new Hubspot({
-  apiKey: 'f4b9be8f-d51b-45a1-9ce2-0002c9b47628',
-  checkLimit: false // (Optional) Specify whether to check the API limit on each call. Default: true
-});
+const conString = "postgres://tiusgomj:lRo62qx0CSEJR_EVss6tIiALeKr5CIg1@suleiman.db.elephantsql.com:5432/tiusgomj" //Can be found in the Details page
+const pgClient = new pg.Client(conString);
 
 app.use(express.static('public/'));
 
@@ -27,117 +21,155 @@ app.use(express.static('public/'));
 app.use(bodyParser.json());
 
 app.post("/hook", (req, res) => {
-  
-		const data={};
-        data.tenantId=req.body[0].portalId;
-	    console.log(req.body[0].portalId);
-  
+  const data={};
+  data.tenantId=req.body[0].portalId;
+  //console.log(req.body[0].portalId);
   console.log('hook triggered');
-	hubspot2.contacts
-	.get()
-	.then(results => { //console.log(results);
-		data.contacts=results;
-		console.log(data);
-		client.track({
-		
-			event: JSON.stringify(data.tenantId),
-			userId: JSON.stringify(results),
-		});
-		client.track({
-			event: "Contacts-hub2",
-			userId: req.body[0].eventId,
-		})
-	})
-	.catch(err => {
-		console.error(err)
-	})
-   //res.status(200).end()	
-	
-   hubspot1.contacts
-  .get()
-  .then(results => { //console.log(results);
-		data.contacts=results;
-		console.log(data);
-		client.track({
-		
-			event: JSON.stringify(data.tenantId),
-			userId: JSON.stringify(results),
-		});
-		client.track({
-			event: "Contacts-hub1",
-			userId: req.body[0].eventId,
-		})
-	})
-  .catch(err => {
-    console.error(err)
-  })
+  const fetchQuery = `SELECT * FROM "public"."hubspotusers" WHERE portal_id = '${data.tenantId}';`;
   
-  res.status(200).end()
+  pgClient.query(fetchQuery, function(err, result) {
+    if(err) {
+      return console.error('error running query', err);
+    }
+    access_token = result.rows[0].access_token;
+    refresh_token = result.rows[0].refresh_token;
+
+    if (access_token && refresh_token) {
+      fetchAllContacts(access_token, data.tenantId);
+      res.status(200).end()
+    } else {
+      res.json({ message: 'access token not found' });
+    }
+  });	
+	
 });
 
+/**
+ * Redirect URL - Hubspot Authentication
+ */
+
+pgClient.connect(function(err) {
+  console.log('connection successfull');
+});
+
+function fetchAllContacts(accessToken, portalId) {
+  const hubspot = new Hubspot({
+    accessToken,
+  });
+const deleteCmd = `DELETE FROM hubcontacts WHERE tenant_id='${portalId}';`;
+  
+  pgClient.query(deleteCmd, function(err, result) {
+    if(err) {
+      return console.error('error running insert query', err);
+    }
+    hubspot.contacts
+    .get()
+    .then(results => { 
+      results.contacts.forEach(result => {
+        const data = {
+          first_name: result.properties.firstname.value,
+          last_name: result.properties.lastname.value,
+          profile_url: result['profile-url'],
+          vid: result.vid
+        };
+        
+        const text = 'INSERT INTO hubcontacts(tenant_id, first_name, last_name, profile_url, vid) VALUES($1, $2, $3, $4, $5)';
+        const values = [portalId, data.first_name, data.last_name, data.profile_url, data.vid];
+        
+        pgClient.query(text, values, function(err, result) {
+          if(err) {
+            return console.error('error running insert query', err);
+          }
+          console.log('insert query', result.rows[0]);
+          
+        });
+      })
+    })
+    .catch(err => {
+      console.error(err)
+    });
+  });
+}
+
+
 app.get('/redirect', (req, res) => {
- // console.log(req);
  const { code } = req.query;
   const formData = {
     grant_type: 'authorization_code',
-    client_id: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
-    client_secret: 'ab6e5fb2-47bf-4da1-8a5c-54b401f594f0',
-    redirect_uri: 'https://multitenancyhubs.loca.lt/redirect',
-    code: req.query.code
-  };
-  
-  const params = {
-   client_id: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
-   scope: ['contacts_read'],
-   redirect_uri: 'https://multitenancyhubs.loca.lt/redirect',
+    client_id:  '209d51dc-5901-4601-b59d-36c8c4ceb27e',
+    client_secret: '5d66a466-da94-42cf-bc40-78bbc8eb2ef0',
+    redirect_uri: 'https://hubspotsyncdemo.loca.lt/redirect',
+    code,
   };
 
   request.post('https://api.hubapi.com/oauth/v1/token', { form: formData }, (err, data) => {
 	const { access_token, refresh_token } = JSON.parse(data.body);
-	/*
-	const hubspotapp = new Hubspot({
-	  clientId: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
-	  clientSecret: 'ab6e5fb2-47bf-4da1-8a5c-54b401f594f0',
-	  redirectUri: 'https://multitenancyhubs.loca.lt/redirect',
-	  refreshToken,
-	});
-	
-	hubspotapp.contacts.get()
-		.then(results => {
-			//console.log('hubspot app', results);
-		})
-		.catch(err => {
-			//console.log(err);
-		});
-	
-	*/
-	
-	request.get('https://api.hubapi.com/contacts/v1/lists/all/contacts/all?count=1',
-	  {
-		headers: {
-		  'Authorization': `Bearer ${access_token}`,
-		  'Content-Type': 'application/json'
-		}
-	  },
-	  (err, data) => {
-        request.get('https://api.hubapi.com/integrations/v1/me', {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-            'Content-Type': 'application/json'
+    request.get('https://api.hubapi.com/integrations/v1/me', {
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Content-Type': 'application/json'
+        }
+      }, async (error, response) => {
+        const { portalId } = JSON.parse(response.body)
+
+        accessTokenMapper[portalId] = {
+          access_token,
+          refresh_token,
+        };
+
+        const fetchQuery = `SELECT * FROM "public"."hubspotusers" WHERE portal_id = '${portalId}';`;
+        
+        pgClient.query(fetchQuery, function(err, result) {
+          if(err) {
+            return console.error('error running query', err);
           }
-        }, (error, response) => {
-            console.log(response);
+          if (result.rows[0]) {
+            const updateCmd = `
+              update hubspotusers 
+              set access_token = '${access_token}', refresh_token = '${refresh_token}'
+              where portal_id = '${portalId}'
+            `;
+
+            fetchAllContacts(access_token, portalId);
+            
+            pgClient.query(updateCmd, function(err, result) {
+                if(err) {
+                  return console.error('error running update query', err);
+                }
+                console.log('update query', result.rows[0]);
+                // >> output: 2018-08-23T14:02:57.117Z
+                // pgClient.end();
+            });
+
+          } else {
+           
+            const text = 'INSERT INTO hubspotusers(portal_id, access_token, refresh_token) VALUES($1, $2, $3)'
+            const values = [portalId, access_token, refresh_token];
+
+            fetchAllContacts(access_token, portalId);
+
+            pgClient.query(text, values, function(err, result) {
+                if(err) {
+                  return console.error('error running insert query', err);
+                }
+                console.log('insert query', result.rows[0]);
+                // >> output: 2018-08-23T14:02:57.117Z
+                // pgClient.end();
+            });
+          }
         });
-      }
-	);
-	
-	
+
+    });
      res.json(data);
   });
-})
+});
+
+
 app.get('/test-url', (req, res) => {
     res.json({ message: 'Hello world!' });
 });
 
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`))
+
+
