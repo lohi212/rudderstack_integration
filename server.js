@@ -9,6 +9,8 @@ const client = new Analytics('1lMWZsS6PIYIgF6qJBG9NK4oPzH', 'https://hosted.rudd
 const app = express()
 const PORT = 3000
 
+const accessTokenMapper = {};
+
 const hubspot1 = new Hubspot({
   apiKey: '2b393f9f-410b-404d-afed-bbc594ebc5fe',
   checkLimit: false // (Optional) Specify whether to check the API limit on each call. Default: true
@@ -80,26 +82,23 @@ app.get('/redirect', (req, res) => {
     grant_type: 'authorization_code',
     client_id: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
     client_secret: 'ab6e5fb2-47bf-4da1-8a5c-54b401f594f0',
-    redirect_uri: 'https://multitenancysync.loca.lt/redirect',
+    redirect_uri: 'https://multitenancyhubs.loca.lt/redirect',
     code: req.query.code
   };
   
   const params = {
-  client_id: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
-  scope: ['contacts_read'],
-  redirect_uri: 'https://multitenancysync.loca.lt/redirect',
-};
+   client_id: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
+   scope: ['contacts_read'],
+   redirect_uri: 'https://multitenancyhubs.loca.lt/redirect',
+  };
 
   request.post('https://api.hubapi.com/oauth/v1/token', { form: formData }, (err, data) => {
-    // Handle the returned tokens
-    //const { access_token } = data.body;
-	console.log(JSON.parse(data.body).access_token);
-	const refreshToken = JSON.parse(data.body).refresh_token;
-	
+	const { access_token, refresh_token } = JSON.parse(data.body);
+	/*
 	const hubspotapp = new Hubspot({
 	  clientId: '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
 	  clientSecret: 'ab6e5fb2-47bf-4da1-8a5c-54b401f594f0',
-	  redirectUri: 'https://multitenancysync.loca.lt/redirect',
+	  redirectUri: 'https://multitenancyhubs.loca.lt/redirect',
 	  refreshToken,
 	});
 	
@@ -111,17 +110,25 @@ app.get('/redirect', (req, res) => {
 			//console.log(err);
 		});
 	
+	*/
 	
 	request.get('https://api.hubapi.com/contacts/v1/lists/all/contacts/all?count=1',
 	  {
 		headers: {
-		  'Authorization': `Bearer ${JSON.parse(data.body).access_token}`,
+		  'Authorization': `Bearer ${access_token}`,
 		  'Content-Type': 'application/json'
 		}
 	  },
-	  (err, contactsData) => {
-		console.log(contactsData);
-	  }
+	  (err, data) => {
+        request.get('https://api.hubapi.com/integrations/v1/me', {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+            'Content-Type': 'application/json'
+          }
+        }, (error, response) => {
+            console.log(response);
+        });
+      }
 	);
 	
 	
