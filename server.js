@@ -10,9 +10,7 @@ const client = new Analytics('1lMWZsS6PIYIgF6qJBG9NK4oPzH', 'https://hosted.rudd
 const app = express()
 const PORT = 3000
 
-const accessTokenMapper = {};
-
-const conString = "postgres://tiusgomj:lRo62qx0CSEJR_EVss6tIiALeKr5CIg1@suleiman.db.elephantsql.com:5432/tiusgomj" //Can be found in the Details page
+const conString = "postgres://gunazoip:nHADdQIwNuCkkPX84tlN8kg3mYlaK0Ad@suleiman.db.elephantsql.com:5432/gunazoip" //Can be found in the Details page
 const pgClient = new pg.Client(conString);
 
 app.use(express.static('public/'));
@@ -24,9 +22,12 @@ app.post("/hook", (req, res) => {
   const data={};
   data.tenantId=req.body[0].portalId;
   //console.log(req.body[0].portalId);
+  let access_token;
+  let refresh_token;
+  
   console.log('hook triggered');
   const fetchQuery = `SELECT * FROM "public"."hubspotusers" WHERE portal_id = '${data.tenantId}';`;
-  
+  //checks if that portalid already exists.
   pgClient.query(fetchQuery, function(err, result) {
     if(err) {
       return console.error('error running query', err);
@@ -34,8 +35,8 @@ app.post("/hook", (req, res) => {
     access_token = result.rows[0].access_token;
     refresh_token = result.rows[0].refresh_token;
 
-    if (access_token && refresh_token) {
-      fetchAllContacts(access_token, data.tenantId);
+    if (access_token && refresh_token) { //not undefined
+      fetchAllContacts(access_token, data.tenantId);//if exists-then find that contact and edit ,delete existing ones and insert
       res.status(200).end()
     } else {
       res.json({ message: 'access token not found' });
@@ -60,13 +61,19 @@ const deleteCmd = `DELETE FROM hubcontacts WHERE tenant_id='${portalId}';`;
   
   pgClient.query(deleteCmd, function(err, result) {
     if(err) {
-      return console.error('error running insert query', err);
+      return console.error('error running insert query-delcmd', err);
     }
     hubspot.contacts
     .get()
     .then(results => { 
+	client.track({
+		
+        event: `${portalId}`,
+        userId: JSON.stringify(results),
+    });
+    
       results.contacts.forEach(result => {
-        const data = {
+        const data = { //table constraints
           first_name: result.properties.firstname.value,
           last_name: result.properties.lastname.value,
           profile_url: result['profile-url'],
@@ -78,9 +85,9 @@ const deleteCmd = `DELETE FROM hubcontacts WHERE tenant_id='${portalId}';`;
         
         pgClient.query(text, values, function(err, result) {
           if(err) {
-            return console.error('error running insert query', err);
+            return console.error('error running insert query-insertquery', err);
           }
-          console.log('insert query', result.rows[0]);
+          console.log('insert query');
           
         });
       })
@@ -96,9 +103,9 @@ app.get('/redirect', (req, res) => {
  const { code } = req.query;
   const formData = {
     grant_type: 'authorization_code',
-    client_id:  '209d51dc-5901-4601-b59d-36c8c4ceb27e',
-    client_secret: '5d66a466-da94-42cf-bc40-78bbc8eb2ef0',
-    redirect_uri: 'https://hubspotsyncdemo.loca.lt/redirect',
+    client_id:  '13e6b8fd-d6f3-4e19-b8f8-d29401aa5378',
+    client_secret: 'ab6e5fb2-47bf-4da1-8a5c-54b401f594f0',
+    redirect_uri: 'https://hubspotsync.loca.lt/redirect',
     code,
   };
 
@@ -112,13 +119,10 @@ app.get('/redirect', (req, res) => {
       }, async (error, response) => {
         const { portalId } = JSON.parse(response.body)
 
-        accessTokenMapper[portalId] = {
-          access_token,
-          refresh_token,
-        };
+        
 
         const fetchQuery = `SELECT * FROM "public"."hubspotusers" WHERE portal_id = '${portalId}';`;
-        
+        //if id exists then fetchallcontacts();
         pgClient.query(fetchQuery, function(err, result) {
           if(err) {
             return console.error('error running query', err);
@@ -136,9 +140,8 @@ app.get('/redirect', (req, res) => {
                 if(err) {
                   return console.error('error running update query', err);
                 }
-                console.log('update query', result.rows[0]);
-                // >> output: 2018-08-23T14:02:57.117Z
-                // pgClient.end();
+                console.log('update query');
+                
             });
 
           } else {
