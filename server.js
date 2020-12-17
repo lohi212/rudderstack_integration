@@ -87,7 +87,7 @@ const deleteCmd = `DELETE FROM hubcontacts WHERE tenant_id='${portalId}';`;
           if(err) {
             return console.error('error running insert query-insertquery', err);
           }
-          console.log('insert query');
+          //console.log('insert query');
           
         });
       })
